@@ -14,7 +14,7 @@ Este repositório contém minha solução para o desafio de criar a **Inteligên
 
 ### Premissas
 
-1. **"Quente" = alta taxa de entrega**: definido como DELIVERED + READ sobre total de tentativas.
+1. **"Quente" = alta taxa de entrega**: definido como `delivered + read` sobre total de tentativas finalizadas.
 2. **Viés de seleção é real**: sistemas mais usados historicamente acumulam mais registros sem necessariamente serem superiores — a análise bruta seria enganosa.
 3. **Dado envelhece**: telefones com registros desatualizados têm menor probabilidade de entrega; modelamos isso com decaimento exponencial.
 4. **WhatsApp é mobile-first**: telefones fixos têm baixíssima chance de sucesso e recebem penalidade no score.
@@ -32,12 +32,48 @@ Este repositório contém minha solução para o desafio de criar a **Inteligên
 
 ---
 
+## Resultados Principais
+
+### Dados
+
+| Métrica | Valor |
+|---|---|
+| Disparos totais | 392.921 |
+| Telefones únicos | 283.289 |
+| Disparos finalizados | 389.761 |
+| Taxa de sucesso geral | 91,6% |
+| Sistemas identificados | 6 |
+
+### Ranking dos Sistemas (Wilson Lower Bound)
+
+| # | Sistema | Taxa Bruta | Score (Wilson LB) |
+|---|---|---|---|
+| 1 | Sys 3 | 99,29% | **99,26%** |
+| 2 | Sys 5 | 86,59% | **86,50%** |
+| 3 | Sys 2 | 79,21% | **78,44%** |
+| 4 | Sys 6 | 66,53% | **66,12%** |
+| 5 | Sys 4 | 50,99% | **50,91%** |
+| 6 | Sys 1 | 47,93% | **47,88%** |
+
+### Modelo de Decaimento Temporal
+
+$$P(t) = 92{,}92\% \times e^{-0{,}000462 \times t}$$
+
+- **Meia-vida do dado**: 1.502 dias (~50 meses)
+- **Prazo de validade** (perda de 20%): 483 dias
+
+### Backtest do Algoritmo
+
+Telefones selecionados pelo algoritmo (Q4 de score) tiveram **+4,27 pp** de taxa de entrega sobre o baseline (98,3% vs 94,1%).
+
+---
+
 ## Parte 1 — Análise Exploratória e Qualidade de Fontes
 
 ### 1.1 Correlação Sistema × Performance
 
 **Pipeline analítico**:
-1. Join `base_disparo` ⟕ `dim_telefone` via `contato_telefone = telefone_mascarado`
+1. Join `base_disparo` ⟕ `dim_telefone` via `contato_telefone = telefone_numero`
 2. Explode do array `telefone_aparicoes` → uma linha por (disparo × sistema)
 3. Agregação por sistema: taxa de entrega bruta e corrigida
 
@@ -52,7 +88,7 @@ $$\text{score}_{j} = \text{Wilson LB}(\hat{p}_j, n_j) = \frac{\hat{p}_j + \frac{
 - Calculado: `dias_desde_atualizacao = data_disparo − registro_data_atualizacao`
 - Análise por faixas: <30d, 30–90d, 90–180d, 180–365d, 1–2 anos, >2 anos
 - Modelo ajustado: $P(\text{entrega} \mid t) = P_0 \cdot e^{-\lambda t}$
-- **Meia-vida** do dado: estimada a partir dos dados históricos
+- **Meia-vida** do dado: 1.502 dias estimada dos dados históricos
 - Heatmap sistema × faixa temporal revela quais sistemas são mais resilientes ao envelhecimento
 
 ---
@@ -74,9 +110,9 @@ $$\text{score}_{\text{tel}} = \max_{j \in \text{sistemas}(i)}\left(\text{score}_
 | Componente | Valor |
 |---|---|
 | `score_j` | Wilson LB do sistema j |
-| `decay(t)` | `exp(−λ × dias_desde_atualizacao)` |
+| `decay(t)` | `exp(−0.000462 × dias_desde_atualizacao)` |
 | `bonus_tipo` | Celular: ×1.10 · Fixo: ×0.50 |
-| `bonus_qualidade` | ALTA: ×1.05 · MEDIA: ×1.00 · BAIXA: ×0.90 |
+| `bonus_qualidade` | VALIDO: ×1.05 · SUSPEITO: ×1.00 · INVALIDO: ×0.90 |
 | `penalidade_proprietários` | N > 1: ×0.85 |
 
 **Seleção dos 2 melhores**:
@@ -95,12 +131,12 @@ $$\text{score}_{\text{tel}} = \max_{j \in \text{sistemas}(i)}\left(\text{score}_
 | Poder | 0.80 |
 | MDE | 2 pp absolutos |
 | Unidade de randomização | CPF |
-| Estratificação | `categoria_hsm` |
-| Métrica primária | Taxa DELIVERED+READ |
-| Métricas secundárias | Taxa READ, custo por entrega, tempo até entrega |
-| Guardrail | Taxa de FAILED técnico não aumenta |
-
-O tamanho de amostra é calculado com base no volume real de disparos históricos, e o notebook fornece a curva de poder × MDE e o cronograma estimado do experimento.
+| Estratificação | `categoria_hsm` (amplitude de 4pp entre categorias) |
+| Métrica primária | Taxa `delivered + read` |
+| Métricas secundárias | Taxa `read`, custo por entrega, tempo até entrega |
+| Guardrail | Taxa de `failed` técnico não aumenta |
+| Tamanho de amostra | 2.121 CPFs por grupo (4.242 total) |
+| Duração estimada | ~3 dias (baseado no volume histórico real) |
 
 ---
 
@@ -138,9 +174,8 @@ O NB02 exporta artefatos para `data/` (ignorado pelo git) que são consumidos pe
 |---|---|
 | `pandas` + `pyarrow` | Leitura de Parquet e manipulação de dados |
 | `gcsfs` | Acesso ao bucket GCS sem download |
-| `scipy` | Ajuste do modelo de decaimento exponencial |
+| `scipy` | Ajuste do modelo de decaimento exponencial e testes estatísticos |
 | `matplotlib` + `seaborn` | Visualizações |
-| `statsmodels` | Disponível para análises adicionais |
 
 ---
 
